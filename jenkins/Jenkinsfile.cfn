@@ -10,10 +10,10 @@ pipeline {
     agent any
 
     environment {
-        // Jenkins credentials store — never hardcode passwords
         DOCKERHUB_CREDS = credentials('dockerhub-credentials')
         AWS_CREDS       = credentials('aws-credentials')
         IMAGE_NAME      = "${DOCKERHUB_CREDS_USR}/calorie-tracker"
+        AWS_DEFAULT_REGION = 'ap-south-1'
     }
 
     stages {
@@ -43,14 +43,23 @@ pipeline {
 
         stage('Deploy CloudFormation Stack') {
             steps {
-                withAWS(credentials: 'aws-credentials', region: 'us-east-1') {
+                // AWS credentials are passed as environment variables
+                // AWS_CREDS_USR = Access Key ID
+                // AWS_CREDS_PSW = Secret Access Key
+                withEnv([
+                    "AWS_ACCESS_KEY_ID=${AWS_CREDS_USR}",
+                    "AWS_SECRET_ACCESS_KEY=${AWS_CREDS_PSW}"
+                ]) {
                     sh """
                         aws cloudformation deploy \
                           --stack-name calorie-tracker-stack \
                           --template-file infra/template.cfn.yml \
-                          --parameter-overrides ImageTag=${BUILD_NUMBER} \
+                          --parameter-overrides \
+                              ImageTag=${BUILD_NUMBER} \
+                              DockerHubUsername=${DOCKERHUB_CREDS_USR} \
                           --capabilities CAPABILITY_IAM \
-                          --no-fail-on-empty-changeset
+                          --no-fail-on-empty-changeset \
+                          --region ap-south-1
                     """
                 }
             }
