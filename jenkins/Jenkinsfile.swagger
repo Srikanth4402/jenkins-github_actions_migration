@@ -47,12 +47,8 @@ pipeline {
             }
             post {
                 always {
-                    // Save the test coverage report inside Jenkins UI
-                    publishHTML(target: [
-                        reportDir  : 'app/coverage/lcov-report',
-                        reportFiles: 'index.html',
-                        reportName : 'Coverage Report'
-                    ])
+                    // Save the coverage report as a downloadable artifact in Jenkins
+                    archiveArtifacts artifacts: 'app/coverage/**', allowEmptyArchive: true
                 }
             }
         }
