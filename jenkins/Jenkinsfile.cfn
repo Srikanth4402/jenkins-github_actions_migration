@@ -1,0 +1,68 @@
+// ─────────────────────────────────────────────────────────────
+// Jenkins Job: cfn-job
+// What it does: builds Docker image, pushes to DockerHub,
+//               and deploys infrastructure via CloudFormation
+// Runs on: ONLY after swagger-job succeeds (triggered by it)
+// ─────────────────────────────────────────────────────────────
+
+pipeline {
+
+    agent any
+
+    environment {
+        // Jenkins credentials store — never hardcode passwords
+        DOCKERHUB_CREDS = credentials('dockerhub-credentials')
+        AWS_CREDS       = credentials('aws-credentials')
+        IMAGE_NAME      = "${DOCKERHUB_CREDS_USR}/calorie-tracker"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                dir('app') {
+                    sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
+                    sh "docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest"
+                }
+            }
+        }
+
+        stage('Push to DockerHub') {
+            steps {
+                sh "echo ${DOCKERHUB_CREDS_PSW} | docker login -u ${DOCKERHUB_CREDS_USR} --password-stdin"
+                sh "docker push ${IMAGE_NAME}:${BUILD_NUMBER}"
+                sh "docker push ${IMAGE_NAME}:latest"
+            }
+        }
+
+        stage('Deploy CloudFormation Stack') {
+            steps {
+                withAWS(credentials: 'aws-credentials', region: 'us-east-1') {
+                    sh """
+                        aws cloudformation deploy \
+                          --stack-name calorie-tracker-stack \
+                          --template-file infra/template.cfn.yml \
+                          --parameter-overrides ImageTag=${BUILD_NUMBER} \
+                          --capabilities CAPABILITY_IAM \
+                          --no-fail-on-empty-changeset
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "cfn-job passed. App deployed with image tag: ${BUILD_NUMBER}"
+        }
+        failure {
+            echo 'cfn-job FAILED. Check logs above.'
+        }
+    }
+}

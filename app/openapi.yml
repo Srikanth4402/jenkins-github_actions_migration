@@ -1,0 +1,171 @@
+openapi: 3.0.3
+
+info:
+  title: Calorie Tracker API
+  description: A simple API to track daily food entries and calories
+  version: 1.0.0
+  license:
+    name: ISC
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+
+# No authentication required for any endpoint
+security: []
+
+paths:
+
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      description: Returns whether the server is running
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: 1.0.0
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /entries:
+    get:
+      operationId: listEntries
+      summary: Get all food entries
+      description: Returns a list of all food entries added today
+      responses:
+        '200':
+          description: A list of entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Entry'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      operationId: createEntry
+      summary: Add a food entry
+      description: Creates a new food entry with a name and calorie count
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewEntry'
+      responses:
+        '201':
+          description: Entry created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entry'
+        '400':
+          description: Missing or invalid fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /entries/total:
+    get:
+      operationId: getTotalCalories
+      summary: Get total calories
+      description: Returns the sum of calories from all entries
+      responses:
+        '200':
+          description: Total calorie count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: number
+                    example: 500
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /entries/{id}:
+    delete:
+      operationId: deleteEntry
+      summary: Delete a food entry
+      description: Removes a food entry by its ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The ID of the entry to delete
+          schema:
+            type: integer
+            example: 1
+      responses:
+        '204':
+          description: Entry deleted successfully
+        '404':
+          description: Entry not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+
+    Entry:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Rice
+        calories:
+          type: number
+          example: 300
+
+    NewEntry:
+      type: object
+      required:
+        - name
+        - calories
+      properties:
+        name:
+          type: string
+          example: Chicken
+        calories:
+          type: number
+          minimum: 0
+          example: 200
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: name and calories are required

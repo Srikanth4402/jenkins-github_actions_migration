@@ -1,0 +1,84 @@
+// ─────────────────────────────────────────────────────────────
+// Jenkins Job: swagger-job
+// What it does: installs dependencies, lints, runs tests,
+//               and validates the OpenAPI spec
+// Runs on: every push to main or develop
+// ─────────────────────────────────────────────────────────────
+
+pipeline {
+
+    // Which Jenkins machine (agent) should run this job?
+    // 'any' means use whatever agent is free
+    agent any
+
+    // Environment variables available to all stages
+    environment {
+        NODE_ENV = 'test'
+    }
+
+    // The actual stages (steps) of this job
+    stages {
+
+        stage('Checkout') {
+            steps {
+                // Pull the latest code from the Git repo
+                checkout scm
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                dir('app') {
+                    sh 'npm ci'
+                }
+            }
+        }
+
+        stage('Lint') {
+            steps {
+                dir('app') {
+                    sh 'npm run lint'
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                dir('app') {
+                    sh 'npm test'
+                }
+            }
+            post {
+                always {
+                    // Save the test coverage report inside Jenkins UI
+                    publishHTML(target: [
+                        reportDir  : 'app/coverage/lcov-report',
+                        reportFiles: 'index.html',
+                        reportName : 'Coverage Report'
+                    ])
+                }
+            }
+        }
+
+        stage('Validate OpenAPI Spec') {
+            steps {
+                dir('app') {
+                    sh 'npx @redocly/cli@1.x lint openapi.yml'
+                }
+            }
+        }
+    }
+
+    // What to do after all stages finish
+    post {
+        success {
+            echo 'swagger-job passed. Triggering cfn-job...'
+            // Manually trigger the next Jenkins job
+            build job: 'cfn-job', wait: false
+        }
+        failure {
+            echo 'swagger-job FAILED. cfn-job will NOT run.'
+            // In real setup: send an email or Slack alert here
+        }
+    }
+}

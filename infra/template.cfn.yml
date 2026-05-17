@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Calorie Tracker API — creates an EC2 instance with Docker,
+  pulls the latest image from DockerHub, and runs the container.
+
+# ─────────────────────────────────────────────────────────────
+# PARAMETERS
+# These are inputs you pass in when deploying.
+# Instead of hardcoding values, you pass them from the pipeline.
+# ─────────────────────────────────────────────────────────────
+Parameters:
+
+  ImageTag:
+    Type: String
+    Description: The Docker image tag to deploy (e.g. the Git commit SHA)
+    Default: latest
+
+  DockerHubUsername:
+    Type: String
+    Description: Your DockerHub username
+
+  InstanceType:
+    Type: String
+    Description: The size of the EC2 instance
+    Default: t2.micro      # Free tier eligible
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+
+  KeyPairName:
+    Type: String
+    Description: Your EC2 key pair name (used to SSH into the server)
+
+# ─────────────────────────────────────────────────────────────
+# RESOURCES
+# These are the actual AWS things CloudFormation will create.
+# ─────────────────────────────────────────────────────────────
+Resources:
+
+  # ── 1. SECURITY GROUP ──────────────────────────────────────
+  # A Security Group is a firewall for your EC2 instance.
+  # It controls which traffic is allowed in (Ingress) and out (Egress).
+  CalorieTrackerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP and SSH access to the calorie tracker
+      SecurityGroupIngress:
+
+        # Allow anyone on the internet to reach port 3000 (your app)
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0       # 0.0.0.0/0 means "everyone"
+
+        # Allow SSH on port 22 — so you can log into the server
+        # In production, replace 0.0.0.0/0 with your office IP
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  # ── 2. IAM ROLE ────────────────────────────────────────────
+  # An IAM Role gives the EC2 instance permission to use AWS services.
+  # Without this, the EC2 instance can't access CloudWatch logs,
+  # pull from ECR, or talk to any other AWS service.
+  CalorieTrackerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Allows the EC2 instance to send logs to CloudWatch
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  # IAM Instance Profile — this is what attaches the Role to the EC2 instance
+  CalorieTrackerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref CalorieTrackerInstanceRole
+
+  # ── 3. EC2 INSTANCE ────────────────────────────────────────
+  # The actual virtual server where your app will run.
+  CalorieTrackerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+
+      # Amazon Machine Image — the base OS for your server
+      # ami-0c02fb55956c7d316 = Amazon Linux 2 in us-east-1
+      ImageId: ami-0c02fb55956c7d316
+
+      # The size of the server (CPU + RAM)
+      InstanceType: !Ref InstanceType
+
+      # Attach the security group (firewall) we created above
+      SecurityGroups:
+        - !Ref CalorieTrackerSecurityGroup
+
+      # Attach the IAM role (permissions) we created above
+      IamInstanceProfile: !Ref CalorieTrackerInstanceProfile
+
+      # Your key pair — used to SSH into the server
+      KeyName: !Ref KeyPairName
+
+      # UserData = a script that runs automatically when the EC2 instance
+      # boots for the first time. This is where we install Docker
+      # and start your application.
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+
+          # Update the system packages
+          yum update -y
+
+          # Install Docker
+          amazon-linux-extras install docker -y
+
+          # Start the Docker service
+          service docker start
+
+          # Allow ec2-user to run docker without sudo
+          usermod -aG docker ec2-user
+
+          # Pull your Docker image from DockerHub
+          docker pull ${DockerHubUsername}/calorie-tracker:${ImageTag}
+
+          # Run the container
+          # -d          = run in background (detached)
+          # --name      = give it a name
+          # -p 3000:3000 = map port 3000 on the server to port 3000 in the container
+          # --restart always = restart the container automatically if it crashes
+          docker run -d \
+            --name calorie-tracker \
+            -p 3000:3000 \
+            --restart always \
+            -e APP_VERSION=${ImageTag} \
+            ${DockerHubUsername}/calorie-tracker:${ImageTag}
+
+      Tags:
+        - Key: Name
+          Value: calorie-tracker-server
+        - Key: Project
+          Value: jenkins-github-actions-migration
+
+# ─────────────────────────────────────────────────────────────
+# OUTPUTS
+# Values that CloudFormation prints after deployment.
+# Useful for getting the public IP of your new server.
+# ─────────────────────────────────────────────────────────────
+Outputs:
+
+  InstancePublicIP:
+    Description: Public IP address of the calorie tracker server
+    Value: !GetAtt CalorieTrackerInstance.PublicIp
+
+  AppURL:
+    Description: URL to access the calorie tracker API
+    Value: !Sub 'http://${CalorieTrackerInstance.PublicIp}:3000'
