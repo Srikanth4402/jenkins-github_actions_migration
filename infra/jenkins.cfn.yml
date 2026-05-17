@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Jenkins server on EC2 (Ubuntu 24.04).
+  Installs Docker using the official script, runs Jenkins as a Docker container,
+  and installs Node.js and Git for pipeline use.
+
+Parameters:
+
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+    Description: EC2 instance size (t2.micro is free tier eligible)
+
+  KeyPairName:
+    Type: String
+    Default: devops-key
+    Description: Key pair name to SSH into the server
+
+Resources:
+
+  # ── 1. SECURITY GROUP ──────────────────────────────────────────
+  # Firewall rules for the Jenkins server
+  JenkinsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Jenkins UI and SSH access
+      SecurityGroupIngress:
+
+        # Jenkins UI runs on port 8080
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+
+        # SSH access on port 22
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  # ── 2. IAM ROLE ────────────────────────────────────────────────
+  # Permissions for the EC2 instance to talk to AWS services
+  JenkinsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  JenkinsInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref JenkinsInstanceRole
+
+  # ── 3. EC2 INSTANCE ────────────────────────────────────────────
+  JenkinsInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+
+      # Ubuntu 24.04 LTS (Noble) — ap-south-1
+      ImageId: ami-0f58b397bc5c1f2e8
+
+      InstanceType: !Ref InstanceType
+
+      KeyName: !Ref KeyPairName
+
+      SecurityGroups:
+        - !Ref JenkinsSecurityGroup
+
+      IamInstanceProfile: !Ref JenkinsInstanceProfile
+
+      # Script that runs on first boot — installs everything
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          exec > /var/log/userdata.log 2>&1
+          set -e
+
+          echo "==> Updating system packages..."
+          apt-get update -y
+          apt-get upgrade -y
+
+          echo "==> Adding 2GB swap space (prevents out-of-memory on t2.micro)..."
+          fallocate -l 2G /swapfile
+          chmod 600 /swapfile
+          mkswap /swapfile
+          swapon /swapfile
+          echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+          echo "==> Installing Git..."
+          apt-get install -y git
+
+          echo "==> Installing Docker using official script..."
+          curl -fsSL https://get.docker.com | sh
+          systemctl start docker
+          systemctl enable docker
+
+          echo "==> Adding ubuntu user to docker group..."
+          usermod -aG docker ubuntu
+
+          echo "==> Running Jenkins as a Docker container..."
+          docker run -d \
+            --name jenkins \
+            --restart always \
+            -p 8080:8080 \
+            -p 50000:50000 \
+            -v jenkins_home:/var/jenkins_home \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -u root \
+            jenkins/jenkins:lts
+
+          echo "==> Waiting for Jenkins container to fully start..."
+          until docker exec jenkins curl -s http://localhost:8080/login > /dev/null 2>&1; do
+            sleep 5
+          done
+
+          echo "==> Installing Node.js 20 and required libraries inside Jenkins container..."
+          docker exec -u root jenkins bash -c "
+            apt-get update -y &&
+            apt-get install -y libatomic1 curl &&
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &&
+            apt-get install -y nodejs
+          "
+
+          echo "==> Node.js version inside Jenkins:"
+          docker exec jenkins node --version
+
+          echo "==> All done! Jenkins is ready at port 8080"
+
+      Tags:
+        - Key: Name
+          Value: jenkins-server
+        - Key: Project
+          Value: jenkins-github-actions-migration
+
+# ── OUTPUTS ──────────────────────────────────────────────────────
+Outputs:
+
+  JenkinsPublicIP:
+    Description: Public IP of the Jenkins server
+    Value: !GetAtt JenkinsInstance.PublicIp
+
+  JenkinsURL:
+    Description: Open this in your browser to access Jenkins
+    Value: !Sub 'http://${JenkinsInstance.PublicIp}:8080'
+
+  SSHCommand:
+    Description: Command to SSH into the Jenkins server
+    Value: !Sub 'ssh -i ~/.ssh/devops-key.pem ubuntu@${JenkinsInstance.PublicIp}'
+
+  GetAdminPassword:
+    Description: Run this command after SSHing in to get the Jenkins unlock password
+    Value: sudo docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword

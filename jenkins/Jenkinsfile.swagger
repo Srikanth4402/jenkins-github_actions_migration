@@ -9,11 +9,6 @@ pipeline {
 
     agent any
 
-    // Use the Node.js version configured in Jenkins Global Tools
-    tools {
-        nodejs 'node20'
-    }
-
     environment {
         NODE_ENV = 'test'
     }
