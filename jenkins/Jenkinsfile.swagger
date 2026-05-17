@@ -7,11 +7,13 @@
 
 pipeline {
 
-    // Which Jenkins machine (agent) should run this job?
-    // 'any' means use whatever agent is free
     agent any
 
-    // Environment variables available to all stages
+    // Use the Node.js version configured in Jenkins Global Tools
+    tools {
+        nodejs 'node20'
+    }
+
     environment {
         NODE_ENV = 'test'
     }
