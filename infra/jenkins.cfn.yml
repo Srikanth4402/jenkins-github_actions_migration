@@ -80,6 +80,14 @@ Resources:
 
       IamInstanceProfile: !Ref JenkinsInstanceProfile
 
+      # Increase root EBS volume from default 8GB to 20GB
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            DeleteOnTermination: true
+
       # Script that runs on first boot — installs everything
       UserData:
         Fn::Base64: |
@@ -109,6 +117,12 @@ Resources:
           echo "==> Adding ubuntu user to docker group..."
           usermod -aG docker ubuntu
 
+          echo "==> Installing AWS CLI on host..."
+          curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          /tmp/aws/install
+          rm -rf /tmp/awscliv2.zip /tmp/aws
+
           echo "==> Running Jenkins as a Docker container..."
           docker run -d \
             --name jenkins \
@@ -117,6 +131,9 @@ Resources:
             -p 50000:50000 \
             -v jenkins_home:/var/jenkins_home \
             -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /usr/local/aws-cli:/usr/local/aws-cli \
+            -v /usr/local/bin/aws:/usr/local/bin/aws \
+            -v /usr/bin/docker:/usr/bin/docker \
             -u root \
             jenkins/jenkins:lts
 
@@ -133,8 +150,7 @@ Resources:
             apt-get install -y nodejs
           "
 
-          echo "==> Copying Docker CLI binary from host into Jenkins container..."
-          docker cp /usr/bin/docker jenkins:/usr/local/bin/docker
+          echo "==> Docker and AWS CLI are mounted directly from host into Jenkins container"
 
           echo "==> Node.js version inside Jenkins:"
           docker exec jenkins node --version
