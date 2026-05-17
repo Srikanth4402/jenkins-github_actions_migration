@@ -125,10 +125,10 @@ Resources:
             sleep 5
           done
 
-          echo "==> Installing Node.js 20 and required libraries inside Jenkins container..."
+          echo "==> Installing Node.js 20, Docker CLI and required libraries inside Jenkins container..."
           docker exec -u root jenkins bash -c "
             apt-get update -y &&
-            apt-get install -y libatomic1 curl &&
+            apt-get install -y libatomic1 curl docker.io &&
             curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &&
             apt-get install -y nodejs
           "
